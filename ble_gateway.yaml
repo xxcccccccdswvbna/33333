@@ -1,0 +1,241 @@
+# ===================== 项目配置 & MAC 地址管理 =====================
+substitutions:
+  project_name: "vvt1"
+  build_time: "Unknown"
+  
+  # ===== 更改设备 MAC 地址请修改这里 (12位纯字母数字) =====
+  mac_ct: "488027700000"   # 餐厅
+  mac_cw: "F0CF2D700000"   # 次卧
+  mac_zzw: "922635700000"  # 主卧
+  mac_kkt: "CDAB38700000"  # 客厅
+
+esphome:
+  name: ble-3
+  friendly_name: "${project_name}"
+  comment: "${project_name} - Build: ${build_time}"
+  includes:
+    - midea_ble_controller.h
+  on_boot:
+    priority: 600
+    then:
+      - lambda: |-
+          // 1. 动态注入 MAC 地址
+          set_device_mac(0, "${mac_ct}");
+          set_device_mac(1, "${mac_cw}");
+          set_device_mac(2, "${mac_zzw}");
+          set_device_mac(3, "${mac_kkt}");
+          
+          // 2. 绑定底层函数
+          ble_set_send_function([](const std::string& hex) { id(tx).send_hex(hex); });
+          mqtt_set_publish_function([](const char* topic, const char* payload) { id(bemfa).publish(topic, payload); });
+          
+          // 3. 注册 HA 实体同步回调
+          register_entity_sync([](int idx, const MideaDevice& dev) {
+              if (idx == 0) {
+                  id(ct_light_on).publish_state(dev.light_on); id(ct_fan_on).publish_state(dev.fan_on);
+                  id(ct_brt).publish_state(dev.brightness); id(ct_ct).publish_state(dev.color_temp); id(ct_spd).publish_state(dev.fan_speed);
+                  id(ct_brt_n).publish_state(dev.brightness); id(ct_ct_n).publish_state(dev.color_temp); id(ct_spd_n).publish_state(dev.fan_speed);
+                  id(ct_light_sw).publish_state(dev.light_on); id(ct_fan_sw).publish_state(dev.fan_on);
+              } else if (idx == 1) {
+                  id(cw_light_on).publish_state(dev.light_on); id(cw_fan_on).publish_state(dev.fan_on);
+                  id(cw_brt).publish_state(dev.brightness); id(cw_ct).publish_state(dev.color_temp); id(cw_spd).publish_state(dev.fan_speed);
+                  id(cw_brt_n).publish_state(dev.brightness); id(cw_ct_n).publish_state(dev.color_temp); id(cw_spd_n).publish_state(dev.fan_speed);
+                  id(cw_light_sw).publish_state(dev.light_on); id(cw_fan_sw).publish_state(dev.fan_on);
+              } else if (idx == 2) {
+                  id(zzw_light_on).publish_state(dev.light_on); id(zzw_fan_on).publish_state(dev.fan_on);
+                  id(zzw_brt).publish_state(dev.brightness); id(zzw_ct).publish_state(dev.color_temp); id(zzw_spd).publish_state(dev.fan_speed);
+                  id(zzw_brt_n).publish_state(dev.brightness); id(zzw_ct_n).publish_state(dev.color_temp); id(zzw_spd_n).publish_state(dev.fan_speed);
+                  id(zzw_light_sw).publish_state(dev.light_on); id(zzw_fan_sw).publish_state(dev.fan_on);
+              } else if (idx == 3) {
+                  id(kkt_light_on).publish_state(dev.light_on); id(kkt_fan_on).publish_state(dev.fan_on);
+                  id(kkt_brt).publish_state(dev.brightness); id(kkt_ct).publish_state(dev.color_temp); id(kkt_spd).publish_state(dev.fan_speed);
+                  id(kkt_brt_n).publish_state(dev.brightness); id(kkt_ct_n).publish_state(dev.color_temp); id(kkt_spd_n).publish_state(dev.fan_speed);
+                  id(kkt_light_sw).publish_state(dev.light_on); id(kkt_fan_sw).publish_state(dev.fan_on);
+              }
+          });
+
+esp32:
+  board: esp32dev
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_FREERTOS_UNICORE: y
+      CONFIG_BT_ENABLED: y
+      CONFIG_BT_BLE_ENABLED: y
+
+logger:
+  baud_rate: 0
+  level: INFO
+
+# WiFi 密码从 secrets.yaml 读取
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+  power_save_mode: none
+  ap:
+    ssid: "BLE-GW Fallback"
+    password: "12345678"
+
+captive_portal:
+web_server:
+  port: 80
+ota:
+  - platform: esphome
+api:
+  reboot_timeout: 0s
+  services:
+    - service: send_raw_hex
+      variables:
+        hex_data: string
+      then:
+        - lambda: 'id(tx).send_hex(hex_data);'
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+ble_tx:
+  id: tx
+
+esp32_ble:
+  io_capability: none
+  enable_on_boot: true
+
+bluetooth_proxy:
+  active: true
+  cache_services: true
+
+# ===================== 全局变量 =====================
+globals:
+  - id: ct_current_ct_kelvin
+    type: int
+    restore_value: no
+    initial_value: '4600'
+  - id: cw_current_ct_kelvin
+    type: int
+    restore_value: no
+    initial_value: '4600'
+  - id: zzw_current_ct_kelvin
+    type: int
+    restore_value: no
+    initial_value: '4600'
+  - id: kkt_current_ct_kelvin
+    type: int
+    restore_value: no
+    initial_value: '4600'
+
+# ===================== 巴法云 MQTT =====================
+mqtt:
+  id: bemfa
+  broker: bemfa.com
+  port: 9501
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  client_id: !secret mqtt_client_id
+  keepalive: 30s
+  discovery: false
+  birth_message:
+  will_message:
+  on_connect:
+    - delay: 2s
+    - lambda: 'publish_all_devices();'
+  on_message:
+    - topic: "ctlight002"
+      then:
+        - lambda: 'handle_light_mqtt(0, x);'
+    - topic: "ctfan003"
+      then:
+        - lambda: 'handle_fan_mqtt(0, x);'
+    - topic: "cwlight002"
+      then:
+        - lambda: 'handle_light_mqtt(1, x);'
+    - topic: "cwfan003"
+      then:
+        - lambda: 'handle_fan_mqtt(1, x);'
+    - topic: "zzwlight002"
+      then:
+        - lambda: 'handle_light_mqtt(2, x);'
+    - topic: "zzwfan003"
+      then:
+        - lambda: 'handle_fan_mqtt(2, x);'
+    - topic: "kktlight002"
+      then:
+        - lambda: 'handle_light_mqtt(3, x);'
+    - topic: "kktfan003"
+      then:
+        - lambda: 'handle_fan_mqtt(3, x);'
+
+# ===================== BLE 扫描 =====================
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 640ms
+    window: 30ms
+    active: false
+  on_ble_advertise:
+    - then:
+        - lambda: |-
+            auto datas = x.get_manufacturer_datas();
+            for (auto &data : datas) parse_ble_advertisement(data.data);
+
+# ===================== 定时任务 =====================
+interval:
+  - interval: 50ms
+    then:
+      - lambda: 'tick_ble_queue();'
+  - interval: 60s
+    then:
+      - lambda: 'tick_heartbeat();'
+
+# ===================== 使用 packages 引入四个房间的实体 =====================
+packages:
+  room_ct: !include { file: templates/room.yaml, vars: { room_id: ct, room_name: "餐厅", device_index: 0 } }
+  room_cw: !include { file: templates/room.yaml, vars: { room_id: cw, room_name: "次卧", device_index: 1 } }
+  room_zzw: !include { file: templates/room.yaml, vars: { room_id: zzw, room_name: "主卧", device_index: 2 } }
+  room_kkt: !include { file: templates/room.yaml, vars: { room_id: kkt, room_name: "客厅", device_index: 3 } }
+
+# ===================== 全局传感器 =====================
+sensor:
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+  - platform: internal_temperature
+    name: "ESP32 Temp"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    update_interval: 60s
+  - platform: wifi_signal
+    name: "WiFi dBm"
+    id: wifi_signal_db
+    update_interval: 60s
+  - platform: copy
+    source_id: wifi_signal_db
+    name: "WiFi Pct"
+    filters:
+      - lambda: return min(max(2*(x+100.0),0.0),100.0);
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+
+# ===================== 文本传感器 =====================
+text_sensor:
+  - platform: template
+    name: "Build Time"
+    lambda: 'return {"${build_time}"};'
+    update_interval: 3600s
+  - platform: version
+    name: "ESPHome Ver"
+    hide_timestamp: true
+  - platform: wifi_info
+    ip_address:
+      name: "ESP IP"
+    ssid:
+      name: "ESP SSID"
+
+# ===================== 重启按钮 =====================
+button:
+  - platform: restart
+    name: "Restart GW"
+    icon: mdi:restart
+    entity_category: diagnostic
