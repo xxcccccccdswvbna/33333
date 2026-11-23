@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [33333]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
